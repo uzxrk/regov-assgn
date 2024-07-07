@@ -1,0 +1,64 @@
+name: QA Pipeline
+
+on:
+  push:
+    branches:
+      - qa
+  workflow_dispatch: # can be uncommented to trigger the job manually
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '20'
+
+      - name: Build project
+        run: npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-south-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+            terraform_version: 1.9.1
+
+      - name: Terraform Init (QA)
+        run: terraform init
+        working-directory: terraform/qa
+
+      - name: Terraform Plan (QA)
+        run: terraform plan
+        working-directory: terraform/qa
+
+      - uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ github.TOKEN }}
+          approvers: uzair-md
+          minimum-approvals: 1
+          issue-title: "Deploying Build ${{github.run_number}} to QA"
+          issue-body: "Approve or deny the deployment of Build No.${{github.run_number}} to QA ?"
+          exclude-workflow-initiator-as-approver: false
+
+      - name: Terraform Apply (QA)
+        run: terraform apply -auto-approve
+        working-directory: terraform/qa
+
+      - name: Deploy to QA environment
+        env:
+          DEPLOY_ENV: qa
+        run: ./deploy.sh $DEPLOY_ENV
